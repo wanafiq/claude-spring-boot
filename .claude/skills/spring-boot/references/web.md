@@ -303,6 +303,78 @@ public class ExternalReactiveApiService {
 }
 ```
 
+## Jackson 3 (Spring Boot 4)
+
+> **Spring Boot 4** uses Jackson 3. Packages move from `com.fasterxml.jackson` to `tools.jackson` (annotations stay unchanged). `ObjectMapper` is replaced by immutable `JsonMapper`. Exceptions are now unchecked (`JacksonException` extends `RuntimeException`).
+
+### JsonMapper Configuration
+
+```java
+@Configuration
+public class JacksonConfig {
+
+    @Bean
+    public JsonMapperBuilderCustomizer jsonMapperCustomizer() {
+        return builder -> builder
+            .enable(SerializationFeature.INDENT_OUTPUT)
+            .serializationInclusion(JsonInclude.Include.NON_NULL);
+    }
+}
+```
+
+### Custom Serializer/Deserializer
+
+```java
+@JacksonComponent
+public class MoneySerializer extends ValueSerializer<Money> {
+    @Override
+    public void serialize(Money value, JsonGenerator generator,
+            SerializationContext context) throws IOException {
+        generator.writeString(value.getAmount().toPlainString() + " " + value.getCurrency());
+    }
+}
+
+@JacksonComponent
+public class MoneyDeserializer extends ValueDeserializer<Money> {
+    @Override
+    public Money deserialize(JsonParser parser, DeserializationContext context)
+            throws IOException {
+        String[] parts = parser.getString().split(" ");
+        return new Money(new BigDecimal(parts[0]), Currency.getInstance(parts[1]));
+    }
+}
+```
+
+### Key Renames
+
+| Jackson 2.x / Spring Boot 3 | Jackson 3.x / Spring Boot 4 |
+|------------------------------|------------------------------|
+| `ObjectMapper` | `JsonMapper` (immutable, use builder) |
+| `JsonSerializer<T>` | `ValueSerializer<T>` |
+| `JsonDeserializer<T>` | `ValueDeserializer<T>` |
+| `SerializerProvider` | `SerializationContext` |
+| `Module` | `JacksonModule` |
+| `JsonProcessingException` | `JacksonException` (unchecked) |
+| `JsonMappingException` | `DatabindException` |
+| `@JsonComponent` | `@JacksonComponent` |
+| `@JsonMixin` | `@JacksonMixin` |
+| `Jackson2ObjectMapperBuilderCustomizer` | `JsonMapperBuilderCustomizer` |
+
+### Changed Defaults
+
+| Setting | 2.x | 3.x |
+|---------|-----|-----|
+| `FAIL_ON_UNKNOWN_PROPERTIES` | `true` | `false` |
+| `SORT_PROPERTIES_ALPHABETICALLY` | `false` | `true` |
+| Date serialization | timestamps | ISO-8601 |
+| Enum read/write | `name()` | `toString()` |
+
+> Use `spring.jackson.use-jackson2-defaults=true` to restore 2.x behavior during migration.
+
+### Modules Merged into jackson-databind
+
+No longer separate dependencies: `jackson-module-parameter-names`, `jackson-datatype-jdk8`, `jackson-datatype-jsr310`.
+
 ## CORS Configuration
 
 ```java
