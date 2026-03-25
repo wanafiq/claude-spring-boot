@@ -1,4 +1,4 @@
-# Security - Spring Security 6
+# Security - Spring Security 7
 
 ## Security Configuration
 
@@ -123,27 +123,58 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
 }
 ```
 
-## JWT Service
+## JWT Service (RSA Certificate-Based)
 
+> **Best practice:** Use asymmetric RSA key pairs instead of shared secrets. The private key signs tokens, the public key verifies them. This allows services to verify tokens without access to the signing key.
+
+### Generate RSA Key Pair
+```bash
+# Generate RSA private key (PKCS#8 format)
+openssl genpkey -algorithm RSA -out private.pem -pkeyopt rsa_keygen_bits:2048
+
+# Extract public key
+openssl rsa -pubout -in private.pem -out public.pem
+```
+
+### Configuration
+```yaml
+# application.yml
+jwt:
+  private-key: classpath:certs/private.pem
+  public-key: classpath:certs/public.pem
+  expiration: 3600000        # 1 hour
+  refresh-expiration: 604800000  # 7 days
+```
+
+### RSA Key Properties
+```java
+@ConfigurationProperties(prefix = "jwt")
+public record JwtProperties(
+    RSAPrivateKey privateKey,
+    RSAPublicKey publicKey,
+    long expiration,
+    long refreshExpiration
+) {}
+```
+
+### JWT Service (using Spring Security 7 NimbusJwtEncoder/Decoder)
 ```java
 @Service
 public class JwtService {
-    @Value("${jwt.secret}")
-    private String secretKey;
+    private final JwtEncoder jwtEncoder;
+    private final JwtDecoder jwtDecoder;
+    private final long jwtExpiration;
+    private final long refreshExpiration;
 
-    @Value("${jwt.expiration}")
-    private long jwtExpiration;
-
-    @Value("${jwt.refresh-expiration}")
-    private long refreshExpiration;
-
-    public String extractUsername(String token) {
-        return extractClaim(token, Claims::getSubject);
+    public JwtService(JwtEncoder jwtEncoder, JwtDecoder jwtDecoder, JwtProperties properties) {
+        this.jwtEncoder = jwtEncoder;
+        this.jwtDecoder = jwtDecoder;
+        this.jwtExpiration = properties.expiration();
+        this.refreshExpiration = properties.refreshExpiration();
     }
 
-    public <T> T extractClaim(String token, Function<Claims, T> claimsResolver) {
-        final Claims claims = extractAllClaims(token);
-        return claimsResolver.apply(claims);
+    public String extractUsername(String token) {
+        return jwtDecoder.decode(token).getSubject();
     }
 
     public String generateToken(UserDetails userDetails) {
@@ -152,12 +183,6 @@ public class JwtService {
             .map(GrantedAuthority::getAuthority)
             .collect(Collectors.toList()));
 
-        return generateToken(extraClaims, userDetails);
-    }
-
-    public String generateToken(
-            Map<String, Object> extraClaims,
-            UserDetails userDetails) {
         return buildToken(extraClaims, userDetails, jwtExpiration);
     }
 
@@ -169,41 +194,46 @@ public class JwtService {
             Map<String, Object> extraClaims,
             UserDetails userDetails,
             long expiration) {
-        return Jwts
-            .builder()
-            .setClaims(extraClaims)
-            .setSubject(userDetails.getUsername())
-            .setIssuedAt(new Date(System.currentTimeMillis()))
-            .setExpiration(new Date(System.currentTimeMillis() + expiration))
-            .signWith(getSignInKey(), SignatureAlgorithm.HS256)
-            .compact();
+        Instant now = Instant.now();
+        JwtClaimsSet claims = JwtClaimsSet.builder()
+            .subject(userDetails.getUsername())
+            .issuedAt(now)
+            .expiresAt(now.plusMillis(expiration))
+            .claims(c -> c.putAll(extraClaims))
+            .build();
+
+        return jwtEncoder.encode(JwtEncoderParameters.from(claims)).getTokenValue();
     }
 
     public boolean isTokenValid(String token, UserDetails userDetails) {
-        final String username = extractUsername(token);
-        return username.equals(userDetails.getUsername()) && !isTokenExpired(token);
+        try {
+            Jwt jwt = jwtDecoder.decode(token);
+            return jwt.getSubject().equals(userDetails.getUsername())
+                && jwt.getExpiresAt() != null
+                && jwt.getExpiresAt().isAfter(Instant.now());
+        } catch (JwtException e) {
+            return false;
+        }
+    }
+}
+```
+
+### JWT Beans Configuration
+```java
+@Configuration
+@EnableConfigurationProperties(JwtProperties.class)
+public class JwtConfig {
+
+    @Bean
+    public JwtDecoder jwtDecoder(JwtProperties properties) {
+        return NimbusJwtDecoder.withPublicKey(properties.publicKey()).build();
     }
 
-    private boolean isTokenExpired(String token) {
-        return extractExpiration(token).before(new Date());
-    }
-
-    private Date extractExpiration(String token) {
-        return extractClaim(token, Claims::getExpiration);
-    }
-
-    private Claims extractAllClaims(String token) {
-        return Jwts
-            .parserBuilder()
-            .setSigningKey(getSignInKey())
-            .build()
-            .parseClaimsJws(token)
-            .getBody();
-    }
-
-    private Key getSignInKey() {
-        byte[] keyBytes = Decoders.BASE64.decode(secretKey);
-        return Keys.hmacShaKeyFor(keyBytes);
+    @Bean
+    public JwtEncoder jwtEncoder(JwtProperties properties) {
+        return NimbusJwtEncoder.withPublicKey(properties.publicKey())
+            .privateKey(properties.privateKey())
+            .build();
     }
 }
 ```
@@ -378,9 +408,12 @@ public class AuthenticationService {
 
 ```java
 @Service
-@RequiredArgsConstructor
 public class UserService {
     private final UserRepository userRepository;
+
+    public UserService(UserRepository userRepository) {
+        this.userRepository = userRepository;
+    }
 
     @PreAuthorize("hasRole('ADMIN')")
     public List<User> getAllUsers() {
@@ -468,7 +501,9 @@ public class OAuth2ResourceServerConfig {
 ## Security Best Practices
 
 - Always use HTTPS in production
-- Store JWT secret in environment variables
+- Use RSA key pairs for JWT signing (never shared HMAC secrets)
+- Store private keys outside source code (mount as volume or use vault)
+- Rotate certificates periodically (automate with cert-manager)
 - Use strong password encoding (BCrypt with strength 12+)
 - Implement token refresh mechanism
 - Add rate limiting to authentication endpoints

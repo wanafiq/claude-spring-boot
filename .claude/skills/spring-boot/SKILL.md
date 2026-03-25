@@ -1,8 +1,8 @@
 ---
 name: spring-boot
-description: Spring Boot 3.x development - REST APIs, JPA, Security, Testing, and Cloud-native patterns. Use for building enterprise Java applications with Spring Boot.
+description: Spring Boot 4.x development - REST APIs, JPA, Security, Testing, and Cloud-native patterns. Use for building enterprise Java 25 applications with Spring Boot.
 metadata:
-  version: "2.0.0"
+  version: "3.0.0"
   domain: backend
   triggers: Spring Boot, Spring Framework, Spring Security, Spring Data JPA, Spring WebFlux, Java REST API, Microservices Java
   role: specialist
@@ -12,14 +12,14 @@ metadata:
 
 # Spring Boot Skill
 
-Enterprise Spring Boot 3.x development with focus on clean architecture and production-ready code.
+Enterprise Spring Boot 4.x development with Java 25, focused on clean architecture and production-ready code.
 
 ## Core Workflow
 
 1. **Analyze** - Understand requirements, identify service boundaries, APIs, data models
 2. **Design** - Plan architecture, confirm design before coding
 3. **Implement** - Build with constructor injection and layered architecture
-4. **Secure** - Add Spring Security, OAuth2, method security; verify tests pass
+4. **Secure** - Add Spring Security 7, OAuth2, method security; verify tests pass
 5. **Test** - Write unit, integration tests; run `./mvnw test` and confirm all pass
 6. **Deploy** - Configure health checks via Actuator; validate `/actuator/health` returns UP
 
@@ -132,9 +132,10 @@ public class GlobalExceptionHandler {
 ### Test Slice
 ```java
 @WebMvcTest(ProductController.class)
+@AutoConfigureMockMvc
 class ProductControllerTest {
     @Autowired MockMvc mockMvc;
-    @MockBean ProductService service;
+    @MockitoBean ProductService service;
 
     @Test
     void createProduct_validRequest_returns201() throws Exception {
@@ -159,9 +160,10 @@ Load detailed patterns based on context:
 |-------|-----------|-------------|
 | Web/REST | `references/web.md` | Controllers, validation, exception handling |
 | Data Access | `references/data.md` | JPA, repositories, transactions, queries |
-| Security | `references/security.md` | Spring Security 6, OAuth2, JWT, auth |
+| Security | `references/security.md` | Spring Security 7, OAuth2, JWT, auth |
 | Cloud/Config | `references/cloud.md` | Config server, discovery, resilience |
 | Testing | `references/testing.md` | Unit, integration, slice tests |
+| Batch | `references/batch.md` | Spring Batch 6, jobs, steps, chunk processing |
 
 ## Constraints
 
@@ -179,7 +181,7 @@ Load detailed patterns based on context:
 - Skip input validation on endpoints
 - Mix blocking and reactive code
 - Store secrets in application.properties
-- Use deprecated Spring Boot 2.x patterns
+- Use deprecated Spring Boot 3.x patterns
 - Hardcode URLs, credentials, environment values
 
 ## Architecture Patterns
@@ -219,6 +221,7 @@ src/main/java/pl/piomin/services/
 | `@Valid` | Trigger validation |
 | `@ConfigurationProperties` | Bind properties to class |
 | `@EnableMethodSecurity` | Enable method security |
+| `@MockitoBean` | Mock bean in test context (replaces @MockBean) |
 
 ## Reactive WebFlux Endpoint
 
@@ -247,7 +250,7 @@ public class OrderController {
 }
 ```
 
-## Spring Security JWT
+## Spring Security JWT (RSA Certificate-Based)
 
 ```java
 @Configuration
@@ -264,9 +267,21 @@ public class SecurityConfig {
                 .oauth2ResourceServer(oauth2 -> oauth2.jwt(Customizer.withDefaults()))
                 .build();
     }
+
+    @Bean
+    public JwtDecoder jwtDecoder(JwtProperties properties) {
+        return NimbusJwtDecoder.withPublicKey(properties.publicKey()).build();
+    }
+
+    @Bean
+    public JwtEncoder jwtEncoder(JwtProperties properties) {
+        return NimbusJwtEncoder.withPublicKey(properties.publicKey())
+                .privateKey(properties.privateKey())
+                .build();
+    }
 }
 ```
 
 ## Knowledge Base
 
-Spring Boot 3.x, Java 21, Spring WebFlux, Project Reactor, Spring Data JPA, Spring Security 6, OAuth2/JWT, Hibernate, R2DBC, Spring Cloud, Resilience4j, Micrometer, JUnit 5, TestContainers, Mockito, Maven/Gradle
+Spring Boot 4.x, Java 25, Jakarta EE 11, Virtual Threads, Structured Concurrency, Spring WebFlux, Project Reactor, Spring Data JPA, Spring Security 7, OAuth2/JWT, Hibernate, R2DBC, Spring Cloud, Spring Batch 6, Resilience4j, Micrometer, RestClient, Jackson 3, JUnit 6, TestContainers, Mockito, Maven/Gradle

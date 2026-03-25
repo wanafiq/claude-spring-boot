@@ -82,32 +82,25 @@ public class ConfigController {
 // POST /actuator/refresh
 ```
 
-## Service Discovery - Eureka
+## Service Discovery
 
+> **Note:** Spring Cloud Netflix Eureka is deprecated and does not support Spring AOT or native images. Prefer Consul or Kubernetes-native service discovery.
+
+### Kubernetes Service Discovery (Recommended)
+```yaml
+# application.yml - uses K8s DNS natively
+spring:
+  application:
+    name: user-service
+  cloud:
+    kubernetes:
+      discovery:
+        enabled: true
+        all-namespaces: false
+```
+
+### Consul Service Discovery
 ```java
-// Eureka Server
-@SpringBootApplication
-@EnableEurekaServer
-public class EurekaServerApplication {
-    public static void main(String[] args) {
-        SpringApplication.run(EurekaServerApplication.class, args);
-    }
-}
-
-// application.yml (Eureka Server)
-server:
-  port: 8761
-
-eureka:
-  instance:
-    hostname: localhost
-  client:
-    register-with-eureka: false
-    fetch-registry: false
-    service-url:
-      defaultZone: http://${eureka.instance.hostname}:${server.port}/eureka/
-
-// Eureka Client
 @SpringBootApplication
 @EnableDiscoveryClient
 public class UserServiceApplication {
@@ -116,20 +109,17 @@ public class UserServiceApplication {
     }
 }
 
-// application.yml (Eureka Client)
+// application.yml (Consul Client)
 spring:
   application:
     name: user-service
-
-eureka:
-  client:
-    service-url:
-      defaultZone: http://localhost:8761/eureka/
-    registry-fetch-interval-seconds: 5
-  instance:
-    prefer-ip-address: true
-    lease-renewal-interval-in-seconds: 10
-    lease-expiration-duration-in-seconds: 30
+  cloud:
+    consul:
+      host: localhost
+      port: 8500
+      discovery:
+        prefer-ip-address: true
+        health-check-interval: 10s
 ```
 
 ## Spring Cloud Gateway
@@ -286,10 +276,14 @@ logging:
 
 // Custom spans
 @Service
-@RequiredArgsConstructor
 public class OrderService {
     private final Tracer tracer;
     private final OrderRepository orderRepository;
+
+    public OrderService(Tracer tracer, OrderRepository orderRepository) {
+        this.tracer = tracer;
+        this.orderRepository = orderRepository;
+    }
 
     public Order processOrder(OrderRequest request) {
         Span span = tracer.nextSpan().name("processOrder").start();
@@ -431,7 +425,7 @@ spec:
         - name: SPRING_PROFILES_ACTIVE
           value: "kubernetes"
         - name: JAVA_OPTS
-          value: "-Xmx512m -Xms256m"
+          value: "-Xmx512m -Xms256m -XX:+UseZGC"
         livenessProbe:
           httpGet:
             path: /actuator/health/liveness
@@ -469,7 +463,7 @@ spec:
 
 ```dockerfile
 # Dockerfile (Multi-stage)
-FROM eclipse-temurin:17-jdk-alpine AS build
+FROM eclipse-temurin:25-jdk-alpine AS build
 WORKDIR /workspace/app
 
 COPY mvnw .
@@ -480,7 +474,7 @@ COPY src src
 RUN ./mvnw install -DskipTests
 RUN mkdir -p target/dependency && (cd target/dependency; jar -xf ../*.jar)
 
-FROM eclipse-temurin:17-jre-alpine
+FROM eclipse-temurin:25-jre-alpine
 VOLUME /tmp
 ARG DEPENDENCY=/workspace/app/target/dependency
 COPY --from=build ${DEPENDENCY}/BOOT-INF/lib /app/lib
@@ -495,7 +489,7 @@ ENTRYPOINT ["java","-cp","app:app/lib/*","com.example.Application"]
 | Component | Purpose |
 |-----------|---------|
 | **Config Server** | Centralized configuration management |
-| **Eureka** | Service discovery and registration |
+| **Consul/K8s** | Service discovery and registration |
 | **Gateway** | API gateway with routing, filtering, load balancing |
 | **Circuit Breaker** | Fault tolerance and fallback patterns |
 | **Load Balancer** | Client-side load balancing |

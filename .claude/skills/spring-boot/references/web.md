@@ -225,7 +225,47 @@ public class UniqueEmailValidator implements ConstraintValidator<UniqueEmail, St
 }
 ```
 
-## WebClient for External APIs
+## RestClient for External APIs (Preferred for Sync)
+
+> **Spring Boot 4**: Use `RestClient` for synchronous HTTP calls (replaces `RestTemplate`). Use `WebClient` only for reactive/async scenarios.
+
+```java
+@Configuration
+public class RestClientConfig {
+    @Bean
+    public RestClient restClient(RestClient.Builder builder) {
+        return builder
+            .baseUrl("https://api.example.com")
+            .defaultHeader(HttpHeaders.CONTENT_TYPE, MediaType.APPLICATION_JSON_VALUE)
+            .build();
+    }
+}
+
+@Service
+public class ExternalApiService {
+    private final RestClient restClient;
+
+    public ExternalApiService(RestClient restClient) {
+        this.restClient = restClient;
+    }
+
+    public ExternalDataResponse fetchData(String id) {
+        return restClient
+            .get()
+            .uri("/data/{id}", id)
+            .retrieve()
+            .onStatus(HttpStatusCode::is4xxClientError, (request, response) -> {
+                throw new ResourceNotFoundException("External resource not found");
+            })
+            .onStatus(HttpStatusCode::is5xxServerError, (request, response) -> {
+                throw new ServiceUnavailableException("External service unavailable");
+            })
+            .body(ExternalDataResponse.class);
+    }
+}
+```
+
+## WebClient for Reactive/Async APIs
 
 ```java
 @Configuration
@@ -235,26 +275,18 @@ public class WebClientConfig {
         return builder
             .baseUrl("https://api.example.com")
             .defaultHeader(HttpHeaders.CONTENT_TYPE, MediaType.APPLICATION_JSON_VALUE)
-            .filter(logRequest())
             .build();
-    }
-
-    private ExchangeFilterFunction logRequest() {
-        return ExchangeFilterFunction.ofRequestProcessor(request -> {
-            log.info("Request: {} {}", request.method(), request.url());
-            return Mono.just(request);
-        });
     }
 }
 
 @Service
-public class ExternalApiService {
+public class ExternalReactiveApiService {
     private final WebClient webClient;
 
-    public ExternalApiService(WebClient webClient) {
+    public ExternalReactiveApiService(WebClient webClient) {
         this.webClient = webClient;
     }
-    
+
     public Mono<ExternalDataResponse> fetchData(String id) {
         return webClient
             .get()
