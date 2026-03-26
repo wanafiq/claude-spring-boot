@@ -21,6 +21,14 @@
 - Skip this for simple, obvious fixes. Don't overengineer
 - Challenge your own work before presenting it
 
+### 5. Code Quality
+- After finishing each task / module: run `mvn spotless:check` then `mvn spotless:apply` to fix violations
+- Follow Palantir Java Format — no manual formatting overrides or `@SuppressWarnings` for style
+- Run `mvn compile` after formatting to catch any issues introduced by auto-format
+- Code must be self-documenting: meaningful names, small methods, single-responsibility classes
+- No Javadoc or comments unless the logic is genuinely non-obvious. Never state the obvious
+- No dead code, unused imports, or commented-out blocks in committed code
+
 ## Core Principles
 - **Simplicity First**: Make every change as simple as possible. Impact minimal code
 - **No Laziness**: Find root causes. No temporary fixes. Senior developer standards
