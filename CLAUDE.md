@@ -35,6 +35,17 @@
 - Understand what capabilities are available before jumping into work
 - Use the right skill or agent for the job — don't reinvent what already exists
 
+### 7. Java Naming Conventions
+- **Packages**: all lowercase, reverse domain notation, underscores for multi-word segments (`com.rh.mydebit`, `com.rh.user_service`)
+- **Classes / Interfaces**: PascalCase, nouns for classes, adjectives or nouns for interfaces (`EmployeeService`, `Serializable`)
+- **Methods**: camelCase, start with a verb (`findById`, `calculateSalary`, `isActive`)
+- **Variables / Fields**: camelCase, descriptive nouns (`employeeName`, `totalCount`)
+- **Constants** (`static final`): UPPER_SNAKE_CASE (`MAX_RETRY_COUNT`, `DEFAULT_PAGE_SIZE`)
+- **Enums**: PascalCase for type, UPPER_SNAKE_CASE for values (`OrderStatus.PENDING`)
+- **Type Parameters**: single uppercase letter (`T`, `E`, `K`, `V`)
+- **Test Classes**: mirror source class name with `Test` suffix (`EmployeeServiceTest`)
+- No abbreviations — use full words (`transaction` not `txn`, `repository` not `repo`, `current` not `curr`)
+
 ## Core Principles
 - **Simplicity First**: Make every change as simple as possible. Impact minimal code
 - **No Laziness**: Find root causes. No temporary fixes. Senior developer standards
