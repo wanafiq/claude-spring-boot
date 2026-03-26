@@ -29,6 +29,12 @@
 - No Javadoc or comments unless the logic is genuinely non-obvious. Never state the obvious
 - No dead code, unused imports, or commented-out blocks in committed code
 
+### 6. Session Start Awareness
+- At the start of each session: review available skills, agents, and tools
+- Check `tasks/lessons.md` for past mistakes and patterns to avoid
+- Understand what capabilities are available before jumping into work
+- Use the right skill or agent for the job — don't reinvent what already exists
+
 ## Core Principles
 - **Simplicity First**: Make every change as simple as possible. Impact minimal code
 - **No Laziness**: Find root causes. No temporary fixes. Senior developer standards
