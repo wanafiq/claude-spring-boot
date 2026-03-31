@@ -44,7 +44,22 @@
 - **Enums**: PascalCase for type, UPPER_SNAKE_CASE for values (`OrderStatus.PENDING`)
 - **Type Parameters**: single uppercase letter (`T`, `E`, `K`, `V`)
 - **Test Classes**: mirror source class name with `Test` suffix (`EmployeeServiceTest`)
-- No abbreviations — use full words (`transaction` not `txn`, `repository` not `repo`, `current` not `curr`)
+
+### 8. Git Commit Convention
+  ```
+  <type>[optional scope]: <description>
+
+  [optional body]
+
+  [optional footer(s)]
+  ```
+- **Allowed types**: `feat`, `fix`, `docs`, `style`, `refactor`, `perf`, `test`, `build`, `ci`, `chore`
+- **Scope**: optional, in parentheses — identifies the affected module (`feat(auth):`, `fix(api):`)
+- **Description**: imperative mood, lowercase, no period at end (`add user endpoint` not `Added user endpoint.`)
+- **Body**: optional, explain the "why" not the "what" — separated by a blank line from the description
+- **Breaking changes**: append `!` after type/scope (`feat!:`) or add `BREAKING CHANGE:` footer
+- **Footer**: use `token: value` format (`Reviewed-by:`, `Refs:`, `Closes #123`)
+- Keep the subject line under 72 characters
 
 ## Core Principles
 - **Simplicity First**: Make every change as simple as possible. Impact minimal code
