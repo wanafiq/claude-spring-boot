@@ -1,6 +1,39 @@
 # Batch Processing - Spring Batch 6
 
+- [Key changes in Spring Batch 6](#key-changes-in-spring-batch-6)
+- [Job Configuration](#job-configuration)
+- [Chunk-Oriented Step](#chunk-oriented-step)
+- [Tasklet Step](#tasklet-step)
+- [ItemReader Implementations](#itemreader-implementations)
+- [ItemProcessor](#itemprocessor)
+- [ItemWriter Implementations](#itemwriter-implementations)
+- [Fault Tolerance](#fault-tolerance-skip--retry)
+- [Job Flow Control](#job-flow-control)
+- [Scaling & Partitioning](#scaling--partitioning)
+- [Testing](#testing)
+- [Running Jobs](#running-jobs)
+
+## Key Changes in Spring Batch 6
+
+Spring Batch 6 (Spring Boot 4.x) introduces significant changes:
+
+- **Resourceless by default** — no longer requires in-memory database (H2/HSQLDB)
+- **`JobRepository` extends `JobExplorer`** — unified interface, fewer beans needed
+- **`JobOperator` extends `JobLauncher`** — unified interface
+- **`@EnableJdbcJobRepository`** — dedicated annotation for JDBC job repository config
+- **`@EnableMongoJobRepository`** — dedicated annotation for MongoDB job repository config
+- **`@EnableBatchProcessing`** — now only configures common attributes (taskExecutor); no longer configures job repository
+- **`ChunkOrientedStepBuilder`** — new stable API for chunk steps (replaces `ChunkOrientedTasklet`)
+- **`RetryPolicy`** — uses Spring Framework 7 retry (replaces Spring Retry library)
+- **`LimitCheckingExceptionHierarchySkipPolicy`** — built-in skip policy
+- **Jackson 3** — default for JSON readers/writers (Jackson 2 deprecated)
+- **XML batch config** — deprecated, use Java configuration
+
 ## Job Configuration
+
+### Basic Job with Spring Boot Auto-Configuration
+
+Spring Boot 4 auto-configures batch infrastructure. No `@EnableBatchProcessing` needed for simple cases.
 
 ```java
 @Configuration
@@ -30,6 +63,28 @@ public class BatchConfig {
 }
 ```
 
+### Explicit JDBC Job Repository Configuration
+
+Use `@EnableJdbcJobRepository` when you need a persistent job repository with a specific DataSource:
+
+```java
+@EnableBatchProcessing(taskExecutorRef = "batchTaskExecutor")
+@EnableJdbcJobRepository(
+    dataSourceRef = "batchDataSource",
+    transactionManagerRef = "batchTransactionManager"
+)
+@Configuration
+public class BatchConfig {
+
+    @Bean
+    public Job myJob(JobRepository jobRepository, Step step1) {
+        return new JobBuilder("myJob", jobRepository)
+            .start(step1)
+            .build();
+    }
+}
+```
+
 ## Chunk-Oriented Step
 
 > The core pattern: read items one at a time, process them, then write in chunks within a transaction.
@@ -51,6 +106,8 @@ public Step importStep(JobRepository jobRepository,
 }
 ```
 
+**Note:** `ItemProcessor` is optional — items pass directly from reader to writer if omitted.
+
 ## Tasklet Step
 
 For simple single-operation tasks (cleanup, validation, file moves).
@@ -70,6 +127,41 @@ public Step validateStep(JobRepository jobRepository,
             return RepeatStatus.FINISHED;
         }, transactionManager)
         .build();
+}
+```
+
+### Custom Tasklet Implementation
+
+```java
+public class FileDeletingTasklet implements Tasklet, InitializingBean {
+
+    private Resource directory;
+
+    @Override
+    public RepeatStatus execute(StepContribution contribution,
+                                ChunkContext chunkContext) throws Exception {
+        File dir = directory.getFile();
+        Assert.state(dir.isDirectory(), "The resource must be a directory");
+
+        File[] files = dir.listFiles();
+        for (File file : files) {
+            boolean deleted = file.delete();
+            if (!deleted) {
+                throw new UnexpectedJobExecutionException(
+                    "Could not delete file " + file.getPath());
+            }
+        }
+        return RepeatStatus.FINISHED;
+    }
+
+    public void setDirectoryResource(Resource directory) {
+        this.directory = directory;
+    }
+
+    @Override
+    public void afterPropertiesSet() {
+        Assert.state(directory != null, "Directory must be set");
+    }
 }
 ```
 
@@ -230,6 +322,36 @@ public FlatFileItemWriter<Customer> csvWriter(
 
 ## Fault Tolerance (Skip & Retry)
 
+### Using RetryPolicy and SkipPolicy (Spring Batch 6)
+
+```java
+@Bean
+public Step faultTolerantStep(JobRepository jobRepository,
+                              PlatformTransactionManager transactionManager,
+                              ItemReader<Customer> reader,
+                              ItemWriter<Customer> writer) {
+    RetryPolicy retryPolicy = RetryPolicy.builder()
+        .maxRetries(3)
+        .includes(Set.of(DeadlockLoserDataAccessException.class))
+        .build();
+
+    SkipPolicy skipPolicy = new LimitCheckingExceptionHierarchySkipPolicy(
+        Set.of(FlatFileParseException.class), 50);
+
+    return new ChunkOrientedStepBuilder<Customer, Customer>("faultTolerantStep", jobRepository, 100)
+        .reader(reader)
+        .writer(writer)
+        .faultTolerant()
+        .retryPolicy(retryPolicy)
+        .skipPolicy(skipPolicy)
+        .build();
+}
+```
+
+### Using StepBuilder with Skip and Retry
+
+The `StepBuilder` API also supports fault tolerance configuration:
+
 ```java
 @Bean
 public Step faultTolerantStep(JobRepository jobRepository,
@@ -237,6 +359,18 @@ public Step faultTolerantStep(JobRepository jobRepository,
                               ItemReader<Customer> reader,
                               ItemProcessor<Customer, Customer> processor,
                               ItemWriter<Customer> writer) {
+
+    int skipLimit = 10;
+    var skippableExceptions = Set.of(FlatFileParseException.class);
+    SkipPolicy skipPolicy = new LimitCheckingExceptionHierarchySkipPolicy(skippableExceptions, skipLimit);
+
+    int retryLimit = 3;
+    var retryableExceptions = Set.of(DeadlockLoserDataAccessException.class);
+    RetryPolicy retryPolicy = RetryPolicy.builder()
+        .maxRetries(retryLimit)
+        .includes(retryableExceptions)
+        .build();
+
     return new StepBuilder("faultTolerantStep", jobRepository)
         .<Customer, Customer>chunk(100)
         .transactionManager(transactionManager)
@@ -244,11 +378,8 @@ public Step faultTolerantStep(JobRepository jobRepository,
         .processor(processor)
         .writer(writer)
         .faultTolerant()
-        .skip(FlatFileParseException.class)
-        .skip(ValidationException.class)
-        .skipLimit(50)
-        .retry(DeadlockLoserDataAccessException.class)
-        .retryLimit(3)
+        .skipPolicy(skipPolicy)
+        .retryPolicy(retryPolicy)
         .listener(new StepExecutionListener() {
             @Override
             public ExitStatus afterStep(StepExecution stepExecution) {
@@ -262,40 +393,56 @@ public Step faultTolerantStep(JobRepository jobRepository,
 }
 ```
 
-### Fault Tolerance (Retry + Skip)
+## Job Flow Control
+
+### Sequential Flow
 
 ```java
 @Bean
-public Step faultTolerantStep(JobRepository jobRepository,
-                              PlatformTransactionManager transactionManager,
-                              ItemReader<Person> reader,
-                              ItemWriter<Person> writer) {
-    return new StepBuilder("step", jobRepository)
-        .<Person, Person>chunk(100, transactionManager)
-        .reader(reader)
-        .writer(writer)
-        .faultTolerant()
-        .retry(TransientException.class)
-        .retryLimit(3)
-        .skip(FlatFileParseException.class)
-        .skipLimit(50)
+public Job job(JobRepository jobRepository, Step stepA, Step stepB, Step stepC) {
+    return new JobBuilder("job", jobRepository)
+        .start(stepA)
+        .next(stepB)
+        .next(stepC)
         .build();
 }
 ```
-
-## Job Flow Control
 
 ### Conditional Flow
 
 ```java
 @Bean
-public Job flowJob(JobRepository jobRepository,
-                   Step stepA, Step stepB, Step stepC, Step errorStep) {
-    return new JobBuilder("flowJob", jobRepository)
+public Job job(JobRepository jobRepository, Step stepA, Step stepB, Step stepC) {
+    return new JobBuilder("job", jobRepository)
         .start(stepA)
-        .on("FAILED").to(errorStep)
-        .from(stepA).on("*").to(stepB)
-        .from(stepB).on("COMPLETED").to(stepC)
+        .on("*").to(stepB)
+        .from(stepA).on("FAILED").to(stepC)
+        .end()
+        .build();
+}
+```
+
+### Programmatic Flow Decisions
+
+```java
+public class MyDecider implements JobExecutionDecider {
+
+    @Override
+    public FlowExecutionStatus decide(JobExecution jobExecution, StepExecution stepExecution) {
+        if (someCondition()) {
+            return new FlowExecutionStatus("SPECIAL");
+        }
+        return new FlowExecutionStatus("COMPLETED");
+    }
+}
+
+@Bean
+public Job job(JobRepository jobRepository, MyDecider decider,
+               Step step1, Step step2, Step step3) {
+    return new JobBuilder("job", jobRepository)
+        .start(step1)
+        .next(decider).on("SPECIAL").to(step2)
+        .from(decider).on("COMPLETED").to(step3)
         .end()
         .build();
 }
@@ -316,6 +463,18 @@ public Job parallelJob(JobRepository jobRepository,
         .start(flow1)
         .split(new SimpleAsyncTaskExecutor())
         .add(flow2)
+        .end()
+        .build();
+}
+```
+
+### Stop and Restart at a Given Step
+
+```java
+@Bean
+public Job job(JobRepository jobRepository, Step step1, Step step2) {
+    return new JobBuilder("job", jobRepository)
+        .start(step1).on("COMPLETED").stopAndRestart(step2)
         .end()
         .build();
 }
@@ -361,7 +520,6 @@ public Step partitionedStep(JobRepository jobRepository,
 public Partitioner rangePartitioner(DataSource dataSource) {
     return gridSize -> {
         Map<String, ExecutionContext> partitions = new HashMap<>();
-        // Divide ID range across partitions
         long min = 1, max = 10000;
         long range = (max - min) / gridSize + 1;
         for (int i = 0; i < gridSize; i++) {
@@ -425,6 +583,7 @@ class ImportJobTest {
 @RestController
 @RequestMapping("/api/jobs")
 public class JobController {
+
     private final JobLauncher jobLauncher;
     private final Job importJob;
 
@@ -478,36 +637,42 @@ spring:
 
 ## Quick Reference
 
-| Component | Purpose |
-|-----------|---------|
-| `Job` | Batch process definition (one or more steps) |
-| `Step` | Independent phase of a job |
-| `Chunk` | Read-process-write pattern with commit interval |
-| `Tasklet` | Single-operation step (no chunking) |
-| `ItemReader` | Reads one item at a time from a source |
-| `ItemProcessor` | Transforms/filters items (return null to skip) |
-| `ItemWriter` | Writes a chunk of items to a target |
-| `JobRepository` | Persists job/step execution metadata |
-| `JobLauncher` | Starts job execution |
-| `@StepScope` | Late-bind job/step parameters into beans |
-| `@EnableBatchProcessing` | Opts out of Boot auto-config (rarely needed) |
-| `@SpringBatchTest` | Test support with JobLauncherTestUtils |
+| Component                              | Purpose                                              |
+|----------------------------------------|------------------------------------------------------|
+| `Job`                                  | Batch process definition (one or more steps)         |
+| `Step`                                 | Independent phase of a job                           |
+| `Chunk`                                | Read-process-write pattern with commit interval      |
+| `Tasklet`                              | Single-operation step (no chunking)                  |
+| `ItemReader`                           | Reads one item at a time from a source               |
+| `ItemProcessor`                        | Transforms/filters items (return null to skip)       |
+| `ItemWriter`                           | Writes a chunk of items to a target                  |
+| `JobRepository`                        | Persists metadata (extends `JobExplorer` in v6)      |
+| `JobOperator`                          | Runs and manages jobs (extends `JobLauncher` in v6)  |
+| `ChunkOrientedStepBuilder`             | New stable chunk step builder (v6)                   |
+| `RetryPolicy`                          | Spring Framework 7 retry policy (replaces Spring Retry) |
+| `LimitCheckingExceptionHierarchySkipPolicy` | Built-in skip policy with exception hierarchy   |
+| `@StepScope`                           | Late-bind job/step parameters into beans             |
+| `@JobScope`                            | Late-bind job parameters into beans                  |
+| `@EnableJdbcJobRepository`             | Configures JDBC-based job repository                 |
+| `@EnableMongoJobRepository`            | Configures MongoDB-based job repository              |
+| `@EnableBatchProcessing`               | Common batch config (taskExecutor only in v6)        |
+| `@SpringBatchTest`                     | Test support with JobLauncherTestUtils               |
 
 ## Common ItemReader/Writer Implementations
 
-| Reader | Source |
-|--------|--------|
-| `FlatFileItemReader` | CSV, fixed-width files |
-| `JsonItemReader` | JSON files |
-| `JdbcCursorItemReader` | Database (streaming cursor) |
-| `JdbcPagingItemReader` | Database (paged queries) |
-| `JpaPagingItemReader` | JPA entities (paged) |
-| `KafkaItemReader` | Kafka topics |
+| Reader                 | Source                          |
+|------------------------|---------------------------------|
+| `FlatFileItemReader`   | CSV, fixed-width files          |
+| `JsonItemReader`       | JSON files                      |
+| `JdbcCursorItemReader` | Database (streaming cursor)     |
+| `JdbcPagingItemReader` | Database (paged queries)        |
+| `JpaPagingItemReader`  | JPA entities (paged)            |
+| `KafkaItemReader`      | Kafka topics                    |
 
-| Writer | Target |
-|--------|--------|
-| `FlatFileItemWriter` | CSV, fixed-width files |
-| `JsonFileItemWriter` | JSON files |
-| `JdbcBatchItemWriter` | Database (JDBC batch insert) |
-| `JpaItemWriter` | JPA entities |
-| `KafkaItemWriter` | Kafka topics |
+| Writer                 | Target                          |
+|------------------------|---------------------------------|
+| `FlatFileItemWriter`   | CSV, fixed-width files          |
+| `JsonFileItemWriter`   | JSON files                      |
+| `JdbcBatchItemWriter`  | Database (JDBC batch insert)    |
+| `JpaItemWriter`        | JPA entities                    |
+| `KafkaItemWriter`      | Kafka topics                    |
