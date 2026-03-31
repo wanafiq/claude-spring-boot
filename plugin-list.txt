@@ -1,0 +1,12 @@
+frontend-design@claude-plugins-official
+superpowers@claude-plugins-official
+context7@claude-plugins-official
+code-review@claude-plugins-official
+code-simplifier@claude-plugins-official
+feature-dev@claude-plugins-official
+ralph-loop@claude-plugins-official
+claude-md-management@claude-plugins-official
+security-guidance@claude-plugins-official
+commit-commands@claude-plugins-official
+skill-creator@claude-plugins-official
+remember@claude-plugins-official
