@@ -137,7 +137,7 @@ public interface UserRepository extends JpaRepository<User, Long>,
     int deactivateInactiveUsers(@Param("threshold") LocalDateTime threshold);
 
     // Projection for read-only DTOs
-    @Query("SELECT new com.example.dto.UserSummary(u.id, u.username, u.email) " +
+    @Query("SELECT new com.companyname.appname.dto.UserSummary(u.id, u.username, u.email) " +
            "FROM User u WHERE u.active = true")
     List<UserSummary> findAllActiveSummaries();
 }
@@ -196,13 +196,23 @@ public class UserService {
 @Service
 @Transactional(readOnly = true)
 public class OrderService {
+
+    private static final Logger log = LoggerFactory.getLogger(OrderService.class);
+
     private final OrderRepository orderRepository;
+    private final OrderEventRepository orderEventRepository;
     private final PaymentService paymentService;
     private final InventoryService inventoryService;
     private final NotificationService notificationService;
 
-    public OrderService(OrderRepository orderRepository, PaymentService paymentService, InventoryService inventoryService, NotificationService notificationService) {
+    public OrderService(
+            OrderRepository orderRepository,
+            OrderEventRepository orderEventRepository,
+            PaymentService paymentService,
+            InventoryService inventoryService,
+            NotificationService notificationService) {
         this.orderRepository = orderRepository;
+        this.orderEventRepository = orderEventRepository;
         this.paymentService = paymentService;
         this.inventoryService = inventoryService;
         this.notificationService = notificationService;
@@ -211,10 +221,9 @@ public class OrderService {
     @Transactional
     public Order createOrder(OrderCreateRequest request) {
         // All operations in single transaction
-        Order order = Order.builder()
-            .customerId(request.customerId())
-            .status(OrderStatus.PENDING)
-            .build();
+        Order order = new Order();
+        order.setCustomerId(request.customerId());
+        order.setStatus(OrderStatus.PENDING);
 
         request.items().forEach(item -> {
             inventoryService.reserveStock(item.productId(), item.quantity());
@@ -348,17 +357,10 @@ List<UserSummaryDto> dtos = userRepository.findAllBy(UserSummaryDto.class);
 
 ## Query Optimization
 
-```java
-@Service
-@Transactional(readOnly = true)
-public class UserQueryService {
-    private final UserRepository userRepository;
-    private final EntityManager entityManager;
+### Repository — JOIN FETCH, EntityGraph, Native Queries
 
-    public UserQueryService(UserRepository userRepository, EntityManager entityManager) {
-        this.userRepository = userRepository;
-        this.entityManager = entityManager;
-    }
+```java
+public interface UserRepository extends JpaRepository<User, Long> {
 
     // N+1 problem solved with JOIN FETCH
     @Query("SELECT DISTINCT u FROM User u " +
@@ -367,19 +369,9 @@ public class UserQueryService {
            "WHERE u.active = true")
     List<User> findAllActiveWithAssociations();
 
-    // Batch fetching
-    @BatchSize(size = 25)
-    @OneToMany(mappedBy = "user")
-    private List<Order> orders;
-
     // EntityGraph for dynamic fetching
     @EntityGraph(attributePaths = {"addresses", "roles"})
     List<User> findAllByActiveTrue();
-
-    // Pagination to avoid loading all data
-    public Page<User> findAllUsers(Pageable pageable) {
-        return userRepository.findAll(pageable);
-    }
 
     // Native query for complex queries
     @Query(value = """
@@ -391,6 +383,38 @@ public class UserQueryService {
         """, nativeQuery = true)
     List<User> findFrequentBuyers(@Param("since") LocalDateTime since,
                                   @Param("minOrders") int minOrders);
+}
+```
+
+### Entity — Batch Fetching
+
+```java
+@Entity
+public class User {
+    // ...
+
+    @BatchSize(size = 25)
+    @OneToMany(mappedBy = "user")
+    private List<Order> orders;
+}
+```
+
+### Service — Pagination
+
+```java
+@Service
+@Transactional(readOnly = true)
+public class UserQueryService {
+
+    private final UserRepository userRepository;
+
+    public UserQueryService(UserRepository userRepository) {
+        this.userRepository = userRepository;
+    }
+
+    public Page<User> findAllUsers(Pageable pageable) {
+        return userRepository.findAll(pageable);
+    }
 }
 ```
 

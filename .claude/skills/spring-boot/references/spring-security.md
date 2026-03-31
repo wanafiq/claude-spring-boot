@@ -67,6 +67,8 @@ public class SecurityConfig {
 ```java
 @Component
 public class JwtAuthenticationFilter extends OncePerRequestFilter {
+
+    private static final Logger log = LoggerFactory.getLogger(JwtAuthenticationFilter.class);
     private final JwtService jwtService;
     private final UserDetailsService userDetailsService;
 
@@ -78,7 +80,7 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
     @Override
     protected void doFilterInternal(
             @NonNull HttpServletRequest request,
-            @NonNull HttpServletRequest response,
+            @NonNull HttpServletResponse response,
             @NonNull FilterChain filterChain) throws ServletException, IOException {
 
         final String authHeader = request.getHeader("Authorization");
@@ -181,7 +183,7 @@ public class JwtService {
         Map<String, Object> extraClaims = new HashMap<>();
         extraClaims.put("roles", userDetails.getAuthorities().stream()
             .map(GrantedAuthority::getAuthority)
-            .collect(Collectors.toList()));
+            .toList());
 
         return buildToken(extraClaims, userDetails, jwtExpiration);
     }
@@ -231,9 +233,11 @@ public class JwtConfig {
 
     @Bean
     public JwtEncoder jwtEncoder(JwtProperties properties) {
-        return NimbusJwtEncoder.withPublicKey(properties.publicKey())
+        JWK jwk = new RSAKey.Builder(properties.publicKey())
             .privateKey(properties.privateKey())
             .build();
+        JWKSource<SecurityContext> jwkSource = new ImmutableJWKSet<>(new JWKSet(jwk));
+        return new NimbusJwtEncoder(jwkSource);
     }
 }
 ```
@@ -262,7 +266,7 @@ public class CustomUserDetailsService implements UserDetailsService {
             .password(user.getPassword())
             .authorities(user.getRoles().stream()
                 .map(role -> new SimpleGrantedAuthority("ROLE_" + role.getName()))
-                .collect(Collectors.toList()))
+                .toList())
             .accountExpired(false)
             .accountLocked(!user.getActive())
             .credentialsExpired(false)
@@ -398,7 +402,7 @@ public class AuthenticationService {
             .password(user.getPassword())
             .authorities(user.getRoles().stream()
                 .map(role -> new SimpleGrantedAuthority("ROLE_" + role.getName()))
-                .collect(Collectors.toList()))
+                .toList())
             .build();
     }
 }

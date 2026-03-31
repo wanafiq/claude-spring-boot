@@ -4,8 +4,6 @@
 
 ```java
 @Configuration
-@EnableBatchProcessing
-@EnableJdbcJobRepository(dataSourceRef = "batchDataSource")
 public class BatchConfig {
 
     @Bean
@@ -264,27 +262,23 @@ public Step faultTolerantStep(JobRepository jobRepository,
 }
 ```
 
-### Policy-Based Fault Tolerance (Spring Batch 6)
+### Fault Tolerance (Retry + Skip)
 
 ```java
 @Bean
-public Step policyBasedStep(JobRepository jobRepository,
-                            ItemReader<Person> reader,
-                            ItemWriter<Person> writer) {
-    RetryPolicy retryPolicy = RetryPolicy.builder()
-        .maxRetries(10)
-        .includes(Set.of(TransientException.class))
-        .build();
-
-    SkipPolicy skipPolicy = new LimitCheckingExceptionHierarchySkipPolicy(
-        Set.of(FlatFileParseException.class), 50);
-
-    return new ChunkOrientedStepBuilder<Person, Person>("step", jobRepository, 100)
+public Step faultTolerantStep(JobRepository jobRepository,
+                              PlatformTransactionManager transactionManager,
+                              ItemReader<Person> reader,
+                              ItemWriter<Person> writer) {
+    return new StepBuilder("step", jobRepository)
+        .<Person, Person>chunk(100, transactionManager)
         .reader(reader)
         .writer(writer)
         .faultTolerant()
-        .retryPolicy(retryPolicy)
-        .skipPolicy(skipPolicy)
+        .retry(TransientException.class)
+        .retryLimit(3)
+        .skip(FlatFileParseException.class)
+        .skipLimit(50)
         .build();
 }
 ```
@@ -496,8 +490,7 @@ spring:
 | `JobRepository` | Persists job/step execution metadata |
 | `JobLauncher` | Starts job execution |
 | `@StepScope` | Late-bind job/step parameters into beans |
-| `@EnableBatchProcessing` | Enables Spring Batch infrastructure |
-| `@EnableJdbcJobRepository` | Configures JDBC-based job repository |
+| `@EnableBatchProcessing` | Opts out of Boot auto-config (rarely needed) |
 | `@SpringBatchTest` | Test support with JobLauncherTestUtils |
 
 ## Common ItemReader/Writer Implementations

@@ -102,7 +102,6 @@ spring:
 ### Consul Service Discovery
 ```java
 @SpringBootApplication
-@EnableDiscoveryClient
 public class UserServiceApplication {
     public static void main(String[] args) {
         SpringApplication.run(UserServiceApplication.class, args);
@@ -390,9 +389,9 @@ management:
       enabled: true
     readinessState:
       enabled: true
-  metrics:
-    export:
-      prometheus:
+  prometheus:
+    metrics:
+      export:
         enabled: true
     tags:
       application: ${spring.application.name}
@@ -481,7 +480,7 @@ COPY --from=build ${DEPENDENCY}/BOOT-INF/lib /app/lib
 COPY --from=build ${DEPENDENCY}/META-INF /app/META-INF
 COPY --from=build ${DEPENDENCY}/BOOT-INF/classes /app
 
-ENTRYPOINT ["java","-cp","app:app/lib/*","com.example.Application"]
+ENTRYPOINT ["java","-cp","app:app/lib/*","com.companyname.appname.Application"]
 ```
 
 ## Quick Reference

@@ -1,287 +1,61 @@
 ---
-name: spring-boot
-description: Spring Boot 4.x development - REST APIs, JPA, Security, Testing, and Cloud-native patterns. Use for building enterprise Java 25 applications with Spring Boot.
-metadata:
-  version: "3.0.0"
-  domain: backend
-  triggers: Spring Boot, Spring Framework, Spring Security, Spring Data JPA, Spring WebFlux, Java REST API, Microservices Java
-  role: specialist
-  scope: implementation
-  output-format: code
+name: spring-boot-skill
+description: >
+  Build Spring Boot 4.x applications following the best practices.
+  Use this skill:
+    * When developing Spring Boot applications using Spring MVC, Spring Data JPA, Spring Modulith, Spring Security
+    * To create recommended Spring Boot package structure
+    * To implement REST APIs, entities/repositories, service layer, modular monoliths
+    * To use Thymeleaf view templates for building web applications
+    * To write tests for REST APIs and Web applications
+    * To configure the recommended plugins and configurations to improve code quality, and testing while using Maven.
+    * To use Spring Boot's Docker Compose support for local development
 ---
 
 # Spring Boot Skill
 
-Enterprise Spring Boot 4.x development with Java 25, focused on clean architecture and production-ready code.
+Apply the practices below when developing Spring Boot applications. Read the linked reference only when working on that area.
 
-## Core Workflow
+## Maven pom.xml Configuration
 
-1. **Analyze** - Understand requirements, identify service boundaries, APIs, data models
-2. **Design** - Plan architecture, confirm design before coding
-3. **Implement** - Build with constructor injection and layered architecture
-4. **Secure** - Add Spring Security 7, OAuth2, method security; verify tests pass
-5. **Test** - Write unit, integration tests; run `./mvnw test` and confirm all pass
-6. **Deploy** - Configure health checks via Actuator; validate `/actuator/health` returns UP
+Read [references/spring-boot-maven-config.md](references/spring-boot-maven-config.md) for Maven `pom.xml` configuration with supporting plugins and configurations to improve code quality, and testing.
 
-## Quick Start Templates
+## Package structure
 
-### Entity
-```java
-@Entity
-@Table(name = "products")
-public class Product {
-    @Id
-    @GeneratedValue(strategy = GenerationType.IDENTITY)
-    private Long id;
+Read [references/code-organization.md](references/code-organization.md) for layer-based package layout and naming conventions.
 
-    @NotBlank
-    private String name;
+## Spring Data JPA
 
-    @DecimalMin("0.0")
-    private BigDecimal price;
+Implement the repository and entity layer using [references/spring-data-jpa.md](references/spring-data-jpa.md).
 
-    // Getters/Setters (no Lombok)
-}
-```
+## Service layer
 
-### Repository
-```java
-public interface ProductRepository extends JpaRepository<Product, Long> {
-    List<Product> findByNameContainingIgnoreCase(String name);
-}
-```
+Implement business logic in the service layer using [references/spring-service-layer.md](references/spring-service-layer.md).
 
-### Service
-```java
-@Service
-@Transactional(readOnly = true)
-public class ProductService {
-    private final ProductRepository repo;
+## Spring MVC REST APIs
 
-    public ProductService(ProductRepository repo) {
-        this.repo = repo;
-    }
+Implement REST APIs with Spring MVC using [references/spring-webmvc-rest-api.md](references/spring-webmvc-rest-api.md).
 
-    public List<Product> search(String name) {
-        return repo.findByNameContainingIgnoreCase(name);
-    }
+## Spring Security
 
-    @Transactional
-    public Product create(ProductRequest request) {
-        var product = new Product();
-        product.setName(request.name());
-        product.setPrice(request.price());
-        return repo.save(product);
-    }
-}
-```
+Secure the application using [references/spring-security.md](references/spring-security.md).
 
-### REST Controller
-```java
-@RestController
-@RequestMapping("/api/v1/products")
-@Validated
-public class ProductController {
-    private final ProductService service;
+## REST API Testing
 
-    public ProductController(ProductService service) {
-        this.service = service;
-    }
+If building a REST API using Spring WebMVC, test Spring Boot REST APIs using [references/spring-boot-rest-api-testing.md](references/spring-boot-rest-api-testing.md).
 
-    @GetMapping
-    public List<Product> search(@RequestParam(defaultValue = "") String name) {
-        return service.search(name);
-    }
+### Web App Controller Testing
 
-    @PostMapping
-    @ResponseStatus(HttpStatus.CREATED)
-    public Product create(@Valid @RequestBody ProductRequest request) {
-        return service.create(request);
-    }
-}
-```
+If building a web application using view rendering controllers, test the controller layer using [references/spring-boot-webapp-testing-with-mockmvctester.md](references/spring-boot-webapp-testing-with-mockmvctester.md).
 
-### DTO (Record)
-```java
-public record ProductRequest(
-    @NotBlank String name,
-    @DecimalMin("0.0") BigDecimal price
-) {}
-```
+## Spring Cloud
 
-### Global Exception Handler
-```java
-@RestControllerAdvice
-public class GlobalExceptionHandler {
-    @ExceptionHandler(MethodArgumentNotValidException.class)
-    @ResponseStatus(HttpStatus.BAD_REQUEST)
-    public Map<String, String> handleValidation(MethodArgumentNotValidException ex) {
-        return ex.getBindingResult().getFieldErrors().stream()
-            .collect(Collectors.toMap(FieldError::getField,
-                    error -> error.getDefaultMessage() != null ? error.getDefaultMessage() : "Invalid"));
-    }
+For config server, service discovery, and resilience patterns, refer [references/spring-cloud.md](references/spring-cloud.md).
 
-    @ExceptionHandler(EntityNotFoundException.class)
-    @ResponseStatus(HttpStatus.NOT_FOUND)
-    public Map<String, String> handleNotFound(EntityNotFoundException ex) {
-        return Map.of("error", ex.getMessage());
-    }
-}
-```
+## Spring Batch
 
-### Test Slice
-```java
-@WebMvcTest(ProductController.class)
-@AutoConfigureMockMvc
-class ProductControllerTest {
-    @Autowired MockMvc mockMvc;
-    @MockitoBean ProductService service;
+For batch processing, jobs, steps, and chunk processing, refer [references/spring-batch.md](references/spring-batch.md).
 
-    @Test
-    void createProduct_validRequest_returns201() throws Exception {
-        var product = new Product();
-        product.setName("Widget");
-        when(service.create(any())).thenReturn(product);
+### Spring Boot Docker Compose Support
 
-        mockMvc.perform(post("/api/v1/products")
-                .contentType(MediaType.APPLICATION_JSON)
-                .content("""{"name":"Widget","price":10.0}"""))
-            .andExpect(status().isCreated())
-            .andExpect(jsonPath("$.name").value("Widget"));
-    }
-}
-```
-
-## Reference Guide
-
-Load detailed patterns based on context:
-
-| Topic | Reference | When to Load |
-|-------|-----------|-------------|
-| Web/REST | `references/web.md` | Controllers, validation, exception handling |
-| Data Access | `references/data.md` | JPA, repositories, transactions, queries |
-| Security | `references/security.md` | Spring Security 7, OAuth2, JWT, auth |
-| Cloud/Config | `references/cloud.md` | Config server, discovery, resilience |
-| Testing | `references/testing.md` | Unit, integration, slice tests |
-| Batch | `references/batch.md` | Spring Batch 6, jobs, steps, chunk processing |
-
-## Constraints
-
-### MUST DO
-- Constructor injection (no field injection)
-- `@Valid` on all request bodies
-- `@Transactional` for multi-step writes
-- `@Transactional(readOnly = true)` for reads
-- Type-safe config with `@ConfigurationProperties`
-- Global exception handling with `@RestControllerAdvice`
-- Externalize secrets (use env vars, not properties files)
-
-### MUST NOT DO
-- Field injection (`@Autowired` on fields)
-- Skip input validation on endpoints
-- Mix blocking and reactive code
-- Store secrets in application.properties
-- Use deprecated Spring Boot 3.x patterns
-- Hardcode URLs, credentials, environment values
-
-## Architecture Patterns
-
-**Project Structure:**
-```
-src/main/java/pl/piomin/services/
-├── controller/     # REST endpoints
-├── service/        # Business logic
-├── repository/     # Data access
-├── model/          # Entities
-├── dto/            # Request/Response DTOs
-├── config/         # Configuration
-└── exception/      # Custom exceptions + handler
-```
-
-**Layering:**
-- Controller → Service → Repository
-- Controller handles HTTP, validation
-- Service handles business logic, transactions
-- Repository handles data persistence
-
-**Clean Architecture Principles:**
-- Domain models independent of frameworks
-- Use case driven design
-- Dependency inversion (interfaces)
-- Clear boundaries between layers
-
-## Common Annotations
-
-| Annotation | Purpose |
-|------------|---------|
-| `@RestController` | REST controller (combines @Controller + @ResponseBody) |
-| `@Service` | Business logic component |
-| `@Repository` | Data access component |
-| `@Transactional` | Transaction management |
-| `@Valid` | Trigger validation |
-| `@ConfigurationProperties` | Bind properties to class |
-| `@EnableMethodSecurity` | Enable method security |
-| `@MockitoBean` | Mock bean in test context (replaces @MockBean) |
-
-## Reactive WebFlux Endpoint
-
-```java
-@RestController
-@RequestMapping("/api/v1/orders")
-public class OrderController {
-    private final OrderService orderService;
-
-    public OrderController(OrderService orderService) {
-        this.orderService = orderService;
-    }
-
-    @GetMapping("/{id}")
-    public Mono<ResponseEntity<OrderDto>> getOrder(@PathVariable UUID id) {
-        return orderService.findById(id)
-                .map(ResponseEntity::ok)
-                .defaultIfEmpty(ResponseEntity.notFound().build());
-    }
-
-    @PostMapping
-    @ResponseStatus(HttpStatus.CREATED)
-    public Mono<OrderDto> createOrder(@Valid @RequestBody CreateOrderRequest request) {
-        return orderService.create(request);
-    }
-}
-```
-
-## Spring Security JWT (RSA Certificate-Based)
-
-```java
-@Configuration
-@EnableMethodSecurity
-public class SecurityConfig {
-    @Bean
-    public SecurityFilterChain filterChain(HttpSecurity http) throws Exception {
-        return http
-                .csrf(AbstractHttpConfigurer::disable)
-                .sessionManagement(s -> s.sessionCreationPolicy(STATELESS))
-                .authorizeHttpRequests(auth -> auth
-                        .requestMatchers("/actuator/health").permitAll()
-                        .anyRequest().authenticated())
-                .oauth2ResourceServer(oauth2 -> oauth2.jwt(Customizer.withDefaults()))
-                .build();
-    }
-
-    @Bean
-    public JwtDecoder jwtDecoder(JwtProperties properties) {
-        return NimbusJwtDecoder.withPublicKey(properties.publicKey()).build();
-    }
-
-    @Bean
-    public JwtEncoder jwtEncoder(JwtProperties properties) {
-        return NimbusJwtEncoder.withPublicKey(properties.publicKey())
-                .privateKey(properties.privateKey())
-                .build();
-    }
-}
-```
-
-## Knowledge Base
-
-Spring Boot 4.x, Java 25, Jakarta EE 11, Virtual Threads, Structured Concurrency, Spring WebFlux, Project Reactor, Spring Data JPA, Spring Security 7, OAuth2/JWT, Hibernate, R2DBC, Spring Cloud, Spring Batch 6, Resilience4j, Micrometer, RestClient, Jackson 3, JUnit 6, TestContainers, Mockito, Maven/Gradle
+To use Docker Compose support for local development, refer [references/spring-boot-docker-compose.md](references/spring-boot-docker-compose.md).
