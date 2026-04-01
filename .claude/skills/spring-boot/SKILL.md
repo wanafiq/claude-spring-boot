@@ -40,13 +40,9 @@ Implement REST APIs with Spring MVC using [references/spring-webmvc-rest-api.md]
 
 Secure the application using [references/spring-security.md](references/spring-security.md).
 
-## REST API Testing
+## Testing
 
-If building a REST API using Spring WebMVC, test Spring Boot REST APIs using [references/spring-boot-rest-api-testing.md](references/spring-boot-rest-api-testing.md).
-
-### Web App Controller Testing
-
-If building a web application using view rendering controllers, test the controller layer using [references/spring-boot-webapp-testing-with-mockmvctester.md](references/spring-boot-webapp-testing-with-mockmvctester.md).
+Test Spring Boot applications using [references/spring-boot-testing.md](references/spring-boot-testing.md). Covers integration tests with RestTestClient, web layer slice tests with MockMvcTester, data layer tests, JSON tests, unit tests with Mockito, and Testcontainers setup.
 
 ## Spring Cloud
 
