@@ -1,469 +1,840 @@
-# Data Access - Spring Data JPA
+# Spring Data JPA 4.x
 
-## JPA Entity Pattern
+- [Repository interfaces](#repository-interfaces)
+- [Defining repositories](#defining-repositories)
+- [Entity persistence](#entity-persistence)
+- [Query methods](#query-methods)
+- [Projections](#projections)
+- [Specifications](#specifications)
+- [Query by Example](#query-by-example)
+- [Custom repository implementations](#custom-repository-implementations)
+- [Auditing](#auditing)
+- [Domain events](#domain-events)
+- [Transactions](#transactions)
+- [Locking](#locking)
+- [Entity graphs](#entity-graphs)
+- [Scrolling large results](#scrolling-large-results)
+
+## Repository interfaces
+
+```java
+// Marker — no methods, captures domain type + ID type
+interface MyRepository extends Repository<Entity, Long> {}
+
+// Standard CRUD — returns Iterable
+interface MyRepository extends CrudRepository<Entity, Long> {}
+
+// CRUD returning List instead of Iterable (preferred)
+interface MyRepository extends ListCrudRepository<Entity, Long> {}
+
+// Pagination and sorting only (does NOT extend CrudRepository since 3.0)
+interface MyRepository extends PagingAndSortingRepository<Entity, Long> {}
+
+// Full JPA features: CRUD + paging + flush + batch delete
+interface MyRepository extends JpaRepository<Entity, Long> {}
+```
+
+Since Spring Data 3.0, `PagingAndSortingRepository` no longer extends `CrudRepository`. Extend both if you need both:
+
+```java
+interface UserRepository extends ListCrudRepository<User, Long>,
+                                 PagingAndSortingRepository<User, Long> {}
+```
+
+### Core CrudRepository methods
+
+```java
+<S extends T> S save(S entity);
+Optional<T> findById(ID id);
+Iterable<T> findAll();
+long count();
+void delete(T entity);
+boolean existsById(ID id);
+```
+
+### Derived count and delete queries
+
+```java
+interface UserRepository extends CrudRepository<User, Long> {
+    long countByLastname(String lastname);
+    long deleteByLastname(String lastname);
+    List<User> removeByLastname(String lastname);
+}
+```
+
+## Defining repositories
+
+### Selective method exposure
+
+```java
+@NoRepositoryBean
+interface MyBaseRepository<T, ID> extends Repository<T, ID> {
+    Optional<T> findById(ID id);
+    <S extends T> S save(S entity);
+}
+
+interface UserRepository extends MyBaseRepository<User, Long> {
+    User findByEmailAddress(String emailAddress);
+}
+```
+
+### @RepositoryDefinition alternative
+
+```java
+@RepositoryDefinition(domainClass = User.class, idClass = Long.class)
+interface UserRepository {
+    Optional<User> findById(Long id);
+    User save(User user);
+}
+```
+
+### Multiple Spring Data modules
+
+Strategy 1 — module-specific interfaces:
+
+```java
+interface PersonRepository extends JpaRepository<Person, Long> {}
+```
+
+Strategy 2 — domain class annotations:
 
 ```java
 @Entity
-@Table(name = "users", indexes = {
-    @Index(name = "idx_email", columnList = "email", unique = true),
-    @Index(name = "idx_username", columnList = "username")
-})
-@EntityListeners(AuditingEntityListener.class)
-public class User {
+class Person { /* JPA */ }
 
-    @Id
-    @GeneratedValue(strategy = GenerationType.IDENTITY)
-    private Long id;
-
-    @Column(nullable = false, unique = true, length = 100)
-    private String email;
-
-    @Column(nullable = false, length = 100)
-    private String password;
-
-    @Column(nullable = false, unique = true, length = 50)
-    private String username;
-
-    @Column(nullable = false)
-    private Boolean active = true;
-
-    @OneToMany(mappedBy = "user", cascade = CascadeType.ALL, orphanRemoval = true)
-    private List<Address> addresses = new ArrayList<>();
-
-    @ManyToMany
-    @JoinTable(
-        name = "user_roles",
-        joinColumns = @JoinColumn(name = "user_id"),
-        inverseJoinColumns = @JoinColumn(name = "role_id")
-    )
-    private Set<Role> roles = new HashSet<>();
-
-    @CreatedDate
-    @Column(nullable = false, updatable = false)
-    private LocalDateTime createdAt;
-
-    @LastModifiedDate
-    @Column(nullable = false)
-    private LocalDateTime updatedAt;
-
-    @Version
-    private Long version;
-
-    // Constructors
-    public User() {}
-
-    public User(Long id, String email, String password, String username, Boolean active,
-                List<Address> addresses, Set<Role> roles, LocalDateTime createdAt,
-                LocalDateTime updatedAt, Long version) {
-        this.id = id;
-        this.email = email;
-        this.password = password;
-        this.username = username;
-        this.active = active != null ? active : true;
-        this.addresses = addresses != null ? addresses : new ArrayList<>();
-        this.roles = roles != null ? roles : new HashSet<>();
-        this.createdAt = createdAt;
-        this.updatedAt = updatedAt;
-        this.version = version;
-    }
-
-    // Getters and Setters
-    public Long getId() { return id; }
-    public void setId(Long id) { this.id = id; }
-
-    public String getEmail() { return email; }
-    public void setEmail(String email) { this.email = email; }
-
-    public String getPassword() { return password; }
-    public void setPassword(String password) { this.password = password; }
-
-    public String getUsername() { return username; }
-    public void setUsername(String username) { this.username = username; }
-
-    public Boolean getActive() { return active; }
-    public void setActive(Boolean active) { this.active = active; }
-
-    public List<Address> getAddresses() { return addresses; }
-    public void setAddresses(List<Address> addresses) { this.addresses = addresses; }
-
-    public Set<Role> getRoles() { return roles; }
-    public void setRoles(Set<Role> roles) { this.roles = roles; }
-
-    public LocalDateTime getCreatedAt() { return createdAt; }
-    public void setCreatedAt(LocalDateTime createdAt) { this.createdAt = createdAt; }
-
-    public LocalDateTime getUpdatedAt() { return updatedAt; }
-    public void setUpdatedAt(LocalDateTime updatedAt) { this.updatedAt = updatedAt; }
-
-    public Long getVersion() { return version; }
-    public void setVersion(Long version) { this.version = version; }
-
-    // Helper methods for bidirectional relationships
-    public void addAddress(Address address) {
-        addresses.add(address);
-        address.setUser(this);
-    }
-
-    public void removeAddress(Address address) {
-        addresses.remove(address);
-        address.setUser(null);
-    }
-}
+@Document
+class User { /* MongoDB */ }
 ```
 
-## Spring Data JPA Repository
+Strategy 3 — base package scoping:
 
 ```java
-@Repository
-public interface UserRepository extends JpaRepository<User, Long>,
-                                       JpaSpecificationExecutor<User> {
-
-    Optional<User> findByEmail(String email);
-
-    Optional<User> findByUsername(String username);
-
-    boolean existsByEmail(String email);
-
-    boolean existsByUsername(String username);
-
-    @Query("SELECT u FROM User u LEFT JOIN FETCH u.roles WHERE u.email = :email")
-    Optional<User> findByEmailWithRoles(@Param("email") String email);
-
-    @Query("SELECT u FROM User u WHERE u.active = true AND u.createdAt >= :since")
-    List<User> findActiveUsersSince(@Param("since") LocalDateTime since);
-
-    @Modifying
-    @Query("UPDATE User u SET u.active = false WHERE u.lastLoginAt < :threshold")
-    int deactivateInactiveUsers(@Param("threshold") LocalDateTime threshold);
-
-    // Projection for read-only DTOs
-    @Query("SELECT new com.companyname.appname.dto.UserSummary(u.id, u.username, u.email) " +
-           "FROM User u WHERE u.active = true")
-    List<UserSummary> findAllActiveSummaries();
-}
+@EnableJpaRepositories(basePackages = "com.acme.repositories.jpa")
+@EnableMongoRepositories(basePackages = "com.acme.repositories.mongo")
+class Configuration {}
 ```
 
-## Repository with Specifications
+## Entity persistence
+
+`CrudRepository.save(…)` delegates to JPA `EntityManager`:
+- **New entity** → `entityManager.persist(…)`
+- **Existing entity** → `entityManager.merge(…)`
+
+### Entity state detection (default)
+
+1. Check `@Version` property — if non-primitive and `null`, entity is new
+2. Check `@Id` property — if `null`, entity is new
+
+### Persistable for manual ID assignment
 
 ```java
-public class UserSpecifications {
-
-    public static Specification<User> hasEmail(String email) {
-        return (root, query, cb) ->
-            email == null ? null : cb.equal(root.get("email"), email);
-    }
-
-    public static Specification<User> isActive() {
-        return (root, query, cb) -> cb.isTrue(root.get("active"));
-    }
-
-    public static Specification<User> createdAfter(LocalDateTime date) {
-        return (root, query, cb) ->
-            date == null ? null : cb.greaterThanOrEqualTo(root.get("createdAt"), date);
-    }
-
-    public static Specification<User> hasRole(String roleName) {
-        return (root, query, cb) -> {
-            Join<User, Role> roles = root.join("roles", JoinType.INNER);
-            return cb.equal(roles.get("name"), roleName);
-        };
-    }
-}
-
-// Usage in service
-@Service
-public class UserService {
-    private final UserRepository userRepository;
-
-    public UserService(UserRepository userRepository) {
-        this.userRepository = userRepository;
-    }
-    
-    public Page<User> searchUsers(UserSearchCriteria criteria, Pageable pageable) {
-        Specification<User> spec = Specification
-            .where(UserSpecifications.hasEmail(criteria.email()))
-            .and(UserSpecifications.isActive())
-            .and(UserSpecifications.createdAfter(criteria.createdAfter()));
-
-        return userRepository.findAll(spec, pageable);
-    }
-}
-```
-
-## Transaction Management
-
-```java
-@Service
-@Transactional(readOnly = true)
-public class OrderService {
-
-    private static final Logger log = LoggerFactory.getLogger(OrderService.class);
-
-    private final OrderRepository orderRepository;
-    private final OrderEventRepository orderEventRepository;
-    private final PaymentService paymentService;
-    private final InventoryService inventoryService;
-    private final NotificationService notificationService;
-
-    public OrderService(
-            OrderRepository orderRepository,
-            OrderEventRepository orderEventRepository,
-            PaymentService paymentService,
-            InventoryService inventoryService,
-            NotificationService notificationService) {
-        this.orderRepository = orderRepository;
-        this.orderEventRepository = orderEventRepository;
-        this.paymentService = paymentService;
-        this.inventoryService = inventoryService;
-        this.notificationService = notificationService;
-    }
-    
-    @Transactional
-    public Order createOrder(OrderCreateRequest request) {
-        // All operations in single transaction
-        Order order = new Order();
-        order.setCustomerId(request.customerId());
-        order.setStatus(OrderStatus.PENDING);
-
-        request.items().forEach(item -> {
-            inventoryService.reserveStock(item.productId(), item.quantity());
-            order.addItem(item);
-        });
-
-        order = orderRepository.save(order);
-
-        try {
-            paymentService.processPayment(order);
-            order.setStatus(OrderStatus.PAID);
-        } catch (PaymentException e) {
-            order.setStatus(OrderStatus.PAYMENT_FAILED);
-            throw e; // Transaction will rollback
-        }
-
-        return orderRepository.save(order);
-    }
-
-    @Transactional(propagation = Propagation.REQUIRES_NEW)
-    public void logOrderEvent(Long orderId, String event) {
-        // Separate transaction - will commit even if parent rolls back
-        OrderEvent orderEvent = new OrderEvent(orderId, event);
-        orderEventRepository.save(orderEvent);
-    }
-
-    @Transactional(noRollbackFor = NotificationException.class)
-    public void completeOrder(Long orderId) {
-        Order order = orderRepository.findById(orderId)
-            .orElseThrow(() -> new ResourceNotFoundException("Order not found"));
-
-        order.setStatus(OrderStatus.COMPLETED);
-        orderRepository.save(order);
-
-        // Won't rollback transaction if notification fails
-        try {
-            notificationService.sendCompletionEmail(order);
-        } catch (NotificationException e) {
-            log.error("Failed to send notification for order {}", orderId, e);
-        }
-    }
-}
-```
-
-## Auditing Configuration
-
-```java
-@Configuration
-@EnableJpaAuditing
-public class JpaAuditingConfig {
-
-    @Bean
-    public AuditorAware<String> auditorProvider() {
-        return () -> {
-            Authentication authentication = SecurityContextHolder
-                .getContext()
-                .getAuthentication();
-
-            if (authentication == null || !authentication.isAuthenticated()) {
-                return Optional.of("system");
-            }
-
-            return Optional.of(authentication.getName());
-        };
-    }
-}
-
 @MappedSuperclass
-@EntityListeners(AuditingEntityListener.class)
-public abstract class AuditableEntity {
+public abstract class AbstractEntity<ID> implements Persistable<ID> {
 
-    @CreatedDate
-    @Column(nullable = false, updatable = false)
-    private LocalDateTime createdAt;
+    @Transient
+    private boolean isNew = true;
 
-    @CreatedBy
-    @Column(nullable = false, updatable = false, length = 100)
-    private String createdBy;
+    @Override
+    public boolean isNew() {
+        return isNew;
+    }
 
-    @LastModifiedDate
-    @Column(nullable = false)
-    private LocalDateTime updatedAt;
-
-    @LastModifiedBy
-    @Column(nullable = false, length = 100)
-    private String updatedBy;
-
-    // Getters and Setters
-    public LocalDateTime getCreatedAt() { return createdAt; }
-    public void setCreatedAt(LocalDateTime createdAt) { this.createdAt = createdAt; }
-    public String getCreatedBy() { return createdBy; }
-    public void setCreatedBy(String createdBy) { this.createdBy = createdBy; }
-    public LocalDateTime getUpdatedAt() { return updatedAt; }
-    public void setUpdatedAt(LocalDateTime updatedAt) { this.updatedAt = updatedAt; }
-    public String getUpdatedBy() { return updatedBy; }
-    public void setUpdatedBy(String updatedBy) { this.updatedBy = updatedBy; }
+    @PostPersist
+    @PostLoad
+    void markNotNew() {
+        this.isNew = false;
+    }
 }
+```
+
+## Query methods
+
+### Derived queries from method names
+
+```java
+public interface UserRepository extends JpaRepository<User, Long> {
+
+    List<User> findByEmailAddressAndLastname(String email, String lastname);
+    // → select u from User u where u.emailAddress = ?1 and u.lastname = ?2
+
+    List<User> findByLastnameOrFirstname(String lastname, String firstname);
+    List<User> findByStartDateBetween(LocalDate start, LocalDate end);
+    List<User> findByAgeLessThan(int age);
+    List<User> findByAgeGreaterThanEqual(int age);
+    List<User> findByLastnameIgnoreCase(String lastname);
+    List<User> findByFirstnameContaining(String fragment);
+    List<User> findByFirstnameStartingWith(String prefix);
+    List<User> findByActiveTrue();
+    List<User> findByActiveFalse();
+    List<User> findByLastnameNot(String lastname);
+    List<User> findByAgeIn(Collection<Integer> ages);
+    List<User> findByLastnameIsNull();
+    List<User> findByLastnameIsNotNull();
+    List<User> findByAgeOrderByLastnameDesc(int age);
+    List<User> findDistinctByLastname(String lastname);
+}
+```
+
+### Keyword reference
+
+| Keyword | JPQL snippet |
+|---------|-------------|
+| `And` | `where x.a = ?1 and x.b = ?2` |
+| `Or` | `where x.a = ?1 or x.b = ?2` |
+| `Is`, `Equals` | `where x.a = ?1` |
+| `Between` | `where x.a between ?1 and ?2` |
+| `LessThan` / `LessThanEqual` | `< ?1` / `<= ?1` |
+| `GreaterThan` / `GreaterThanEqual` | `> ?1` / `>= ?1` |
+| `After` / `Before` | `> ?1` / `< ?1` |
+| `IsNull` / `IsNotNull` | `is null` / `is not null` |
+| `Like` / `NotLike` | `like ?1` / `not like ?1` |
+| `StartingWith` | `like ?1%` |
+| `EndingWith` | `like %?1` |
+| `Containing` | `like %?1%` |
+| `OrderBy` | `order by x.a desc` |
+| `Not` | `<> ?1` |
+| `In` / `NotIn` | `in ?1` / `not in ?1` |
+| `True` / `False` | `= true` / `= false` |
+| `IgnoreCase` | `UPPER(x.a) = UPPER(?1)` |
+
+### @Query — JPQL
+
+```java
+@Query("select u from User u where u.emailAddress = ?1")
+User findByEmailAddress(String emailAddress);
+
+@Query("select u from User u where u.firstname like %?1")
+List<User> findByFirstnameEndsWith(String firstname);
+```
+
+### @Query — named parameters
+
+```java
+@Query("select u from User u where u.firstname = :firstname or u.lastname = :lastname")
+User findByLastnameOrFirstname(@Param("lastname") String lastname,
+                               @Param("firstname") String firstname);
+```
+
+With `-parameters` compiler flag (Spring Data 4+), `@Param` is optional.
+
+### @NativeQuery
+
+```java
+@NativeQuery("SELECT * FROM users WHERE email_address = ?1")
+User findByEmailAddress(String emailAddress);
+
+@NativeQuery(value = "SELECT * FROM users WHERE lastname = ?1",
+             countQuery = "SELECT count(*) FROM users WHERE lastname = ?1")
+Page<User> findByLastname(String lastname, Pageable pageable);
+```
+
+### Native query returning raw maps
+
+```java
+@NativeQuery("SELECT * FROM users WHERE email_address = ?1")
+Map<String, Object> findRawMapByEmail(String emailAddress);
+
+@NativeQuery("SELECT * FROM users WHERE lastname = ?1")
+List<Map<String, Object>> findRawMapByLastname(String lastname);
+```
+
+### Modifying queries
+
+```java
+@Modifying
+@Query("update User u set u.firstname = ?1 where u.lastname = ?2")
+int setFixedFirstnameFor(String firstname, String lastname);
+
+@Modifying
+@Query("delete from User u where u.active = false")
+void deleteInactiveUsers();
+```
+
+Derived `deleteByX()` loads entities and triggers lifecycle callbacks. `@Modifying @Query` issues a single bulk statement without callbacks.
+
+### SpEL in queries
+
+```java
+// #{#entityName} resolves to the entity name — useful for inheritance
+@Query("select e from #{#entityName} e where e.attribute = ?1")
+List<T> findAllByAttribute(String attribute);
+
+// Sanitize LIKE input
+@Query("select u from User u where u.firstname like %?#{escape([0])}% escape ?#{escapeCharacter()}")
+List<User> findContainingEscaped(String namePart);
+```
+
+### Sorting with @Query
+
+```java
+@Query("select u from User u where u.lastname like ?1%")
+List<User> findByAndSort(String lastname, Sort sort);
+
+// Safe property-based sort
+repo.findByAndSort("stark", Sort.by("firstname"));
+
+// Unsafe function-based sort
+repo.findByAndSort("targaryen", JpaSort.unsafe("LENGTH(firstname)"));
+```
+
+### Query hints
+
+```java
+@QueryHints(value = { @QueryHint(name = "name", value = "value") },
+            forCounting = false)
+Page<User> findByLastname(String lastname, Pageable pageable);
+```
+
+### Query comments with @Meta
+
+```java
+@Meta(comment = "find roles by name")
+List<Role> findByName(String name);
+```
+
+Requires `spring.jpa.properties.hibernate.use_sql_comments=true`.
+
+### Named queries
+
+```java
+@Entity
+@NamedQuery(name = "User.findByEmailAddress",
+            query = "select u from User u where u.emailAddress = ?1")
+public class User { }
+
+// Repository method resolves to named query User.findByEmailAddress
+public interface UserRepository extends JpaRepository<User, Long> {
+    User findByEmailAddress(String emailAddress);
+}
+```
+
+### Query rewriting
+
+```java
+public class MyQueryRewriter implements QueryRewriter {
+    @Override
+    public String rewrite(String query, Sort sort) {
+        return query.replaceAll("original_alias", "rewritten_alias");
+    }
+}
+
+@Query(value = "select u from User u", queryRewriter = MyQueryRewriter.class)
+List<User> findByNonNativeQuery(String param);
 ```
 
 ## Projections
 
-```java
-// Interface-based projection
-public interface UserSummary {
-    Long getId();
-    String getUsername();
-    String getEmail();
+### Closed interface projection
 
-    @Value("#{target.firstName + ' ' + target.lastName}")
+```java
+interface NamesOnly {
+    String getFirstname();
+    String getLastname();
+}
+
+interface PersonRepository extends Repository<Person, UUID> {
+    Collection<NamesOnly> findByLastname(String lastname);
+}
+```
+
+Spring Data optimizes the query to select only the required columns.
+
+### Open interface projection
+
+```java
+interface NamesOnly {
+    @Value("#{target.firstname + ' ' + target.lastname}")
     String getFullName();
 }
-
-// Class-based projection (DTO)
-public record UserSummaryDto(
-    Long id,
-    String username,
-    String email
-) {}
-
-// Usage
-public interface UserRepository extends JpaRepository<User, Long> {
-    List<UserSummary> findAllBy();
-
-    <T> List<T> findAllBy(Class<T> type);
-}
-
-// Service usage
-List<UserSummary> summaries = userRepository.findAllBy();
-List<UserSummaryDto> dtos = userRepository.findAllBy(UserSummaryDto.class);
 ```
 
-## Query Optimization
+Open projections require full entity materialization.
 
-### Repository — JOIN FETCH, EntityGraph, Native Queries
+### Default method projection
 
 ```java
-public interface UserRepository extends JpaRepository<User, Long> {
+interface NamesOnly {
+    String getFirstname();
+    String getLastname();
 
-    // N+1 problem solved with JOIN FETCH
-    @Query("SELECT DISTINCT u FROM User u " +
-           "LEFT JOIN FETCH u.addresses " +
-           "LEFT JOIN FETCH u.roles " +
-           "WHERE u.active = true")
-    List<User> findAllActiveWithAssociations();
-
-    // EntityGraph for dynamic fetching
-    @EntityGraph(attributePaths = {"addresses", "roles"})
-    List<User> findAllByActiveTrue();
-
-    // Native query for complex queries
-    @Query(value = """
-        SELECT u.* FROM users u
-        INNER JOIN orders o ON u.id = o.user_id
-        WHERE o.created_at >= :since
-        GROUP BY u.id
-        HAVING COUNT(o.id) >= :minOrders
-        """, nativeQuery = true)
-    List<User> findFrequentBuyers(@Param("since") LocalDateTime since,
-                                  @Param("minOrders") int minOrders);
+    default String getFullName() {
+        return getFirstname().concat(" ").concat(getLastname());
+    }
 }
 ```
 
-### Entity — Batch Fetching
+### Class-based projection (DTO with record)
+
+```java
+record NamesOnly(String firstname, String lastname) {}
+
+interface PersonRepository extends Repository<Person, UUID> {
+    Collection<NamesOnly> findByLastname(String lastname);
+}
+```
+
+Spring Data JPA auto-rewrites JPQL to constructor expressions for DTO projections.
+
+### Nested projections
+
+```java
+interface PersonSummary {
+    String getFirstname();
+    String getLastname();
+    AddressSummary getAddress();
+
+    interface AddressSummary {
+        String getCity();
+    }
+}
+```
+
+### Dynamic projections
+
+```java
+interface PersonRepository extends Repository<Person, UUID> {
+    <T> Collection<T> findByLastname(String lastname, Class<T> type);
+}
+
+// Usage
+Collection<Person> aggregates = people.findByLastname("Matthews", Person.class);
+Collection<NamesOnly> projections = people.findByLastname("Matthews", NamesOnly.class);
+```
+
+### JPQL constructor expression
+
+```java
+@Query("SELECT new com.example.UserDto(u.firstname, u.lastname) FROM User u WHERE u.lastname = :lastname")
+List<UserDto> findByLastname(String lastname);
+```
+
+## Specifications
+
+Enable by extending `JpaSpecificationExecutor`:
+
+```java
+public interface CustomerRepository extends CrudRepository<Customer, Long>,
+                                            JpaSpecificationExecutor<Customer> {}
+```
+
+### PredicateSpecification (Spring Data JPA 4.0+)
+
+```java
+public interface PredicateSpecification<T> {
+    Predicate toPredicate(From<?, T> from, CriteriaBuilder builder);
+}
+```
+
+```java
+class CustomerSpecs {
+
+    static PredicateSpecification<Customer> isLongTermCustomer() {
+        return (from, builder) -> {
+            LocalDate date = LocalDate.now().minusYears(2);
+            return builder.lessThan(from.get("createdAt"), date);
+        };
+    }
+
+    static PredicateSpecification<Customer> hasSalesOfMoreThan(MonetaryAmount value) {
+        return (from, builder) -> builder.greaterThan(from.get("sales"), value);
+    }
+}
+```
+
+### Composing specifications
+
+```java
+List<Customer> customers = customerRepository.findAll(
+    isLongTermCustomer().or(hasSalesOfMoreThan(amount))
+);
+```
+
+### Specification (query-bound)
+
+```java
+public interface Specification<T> {
+    Predicate toPredicate(Root<T> root, CriteriaQuery<?> query, CriteriaBuilder builder);
+}
+```
+
+### UpdateSpecification and DeleteSpecification
+
+```java
+public interface UpdateSpecification<T> {
+    Predicate toPredicate(Root<T> root, CriteriaUpdate<T> update, CriteriaBuilder builder);
+}
+
+public interface DeleteSpecification<T> {
+    Predicate toPredicate(Root<T> root, CriteriaDelete<T> delete, CriteriaBuilder builder);
+}
+```
+
+### Fluent API with specifications
+
+```java
+// Projected page
+Page<CustomerProjection> page = repository.findBy(spec,
+    q -> q.as(CustomerProjection.class)
+          .page(PageRequest.of(0, 20, Sort.by("lastname"))));
+
+// First result sorted
+Optional<Customer> match = repository.findBy(spec,
+    q -> q.sortBy(Sort.by("lastname").descending()).first());
+```
+
+Fluent terminal methods: `first()`, `one()`, `all()`, `page(Pageable)`, `slice(Pageable)`, `scroll(ScrollPosition)`, `stream()`, `count()`, `exists()`.
+
+## Query by Example
+
+```java
+Person person = new Person();
+person.setFirstname("Dave");
+
+Example<Person> example = Example.of(person);
+List<Person> results = personRepository.findAll(example);
+```
+
+### ExampleMatcher
+
+```java
+ExampleMatcher matcher = ExampleMatcher.matching()
+    .withIgnorePaths("lastname")
+    .withIncludeNullValues()
+    .withStringMatcher(StringMatcher.ENDING);
+
+Example<Person> example = Example.of(person, matcher);
+```
+
+### Per-property matchers
+
+```java
+ExampleMatcher matcher = ExampleMatcher.matching()
+    .withMatcher("firstname", endsWith())
+    .withMatcher("lastname", startsWith().ignoreCase());
+```
+
+### StringMatcher options
+
+| Matcher | Behavior |
+|---------|----------|
+| `DEFAULT` | `firstname = ?0` |
+| `EXACT` | `firstname = ?0` |
+| `STARTING` | `firstname like ?0 + '%'` |
+| `ENDING` | `firstname like '%' + ?0` |
+| `CONTAINING` | `firstname like '%' + ?0 + '%'` |
+
+All matchers support `.ignoreCase()`.
+
+### Fluent API with QBE
+
+```java
+Page<CustomerProjection> page = repository.findBy(example,
+    q -> q.as(CustomerProjection.class)
+          .page(PageRequest.of(0, 20, Sort.by("lastname"))));
+```
+
+## Custom repository implementations
+
+### Fragment interface pattern
+
+```java
+interface CustomizedUserRepository {
+    void someCustomMethod(User user);
+}
+
+// Implementation class: interface name + "Impl" suffix
+class CustomizedUserRepositoryImpl implements CustomizedUserRepository {
+    @Override
+    public void someCustomMethod(User user) {
+        // custom implementation
+    }
+}
+
+interface UserRepository extends CrudRepository<User, Long>, CustomizedUserRepository {}
+```
+
+### Multiple fragments
+
+```java
+interface UserRepository extends CrudRepository<User, Long>,
+                                 HumanRepository,
+                                 ContactRepository {}
+```
+
+### Reusable generic fragment
+
+```java
+interface CustomizedSave<T> {
+    <S extends T> S save(S entity);
+}
+
+class CustomizedSaveImpl<T> implements CustomizedSave<T> {
+    @Override
+    public <S extends T> S save(S entity) { /* custom */ }
+}
+
+interface UserRepository extends CrudRepository<User, Long>, CustomizedSave<User> {}
+```
+
+### Custom base repository class
+
+```java
+class MyRepositoryImpl<T, ID> extends SimpleJpaRepository<T, ID> {
+
+    private final EntityManager entityManager;
+
+    MyRepositoryImpl(JpaEntityInformation entityInformation,
+                     EntityManager entityManager) {
+        super(entityInformation, entityManager);
+        this.entityManager = entityManager;
+    }
+
+    @Override
+    @Transactional
+    public <S extends T> S save(S entity) {
+        // custom save logic
+    }
+}
+
+@Configuration
+@EnableJpaRepositories(repositoryBaseClass = MyRepositoryImpl.class)
+class ApplicationConfiguration {}
+```
+
+### Using JpaContext for multi-EntityManager
+
+```java
+class UserRepositoryImpl implements UserRepositoryCustom {
+
+    private final EntityManager entityManager;
+
+    public UserRepositoryImpl(JpaContext context) {
+        this.entityManager = context.getEntityManagerByManagedType(User.class);
+    }
+}
+```
+
+## Auditing
+
+### Auditable entity
 
 ```java
 @Entity
+@EntityListeners(AuditingEntityListener.class)
 public class User {
-    // ...
 
-    @BatchSize(size = 25)
-    @OneToMany(mappedBy = "user")
-    private List<Order> orders;
+    @CreatedBy
+    private String createdBy;
+
+    @CreatedDate
+    private Instant createdDate;
+
+    @LastModifiedBy
+    private String lastModifiedBy;
+
+    @LastModifiedDate
+    private Instant lastModifiedDate;
 }
 ```
 
-### Service — Pagination
+`@CreatedDate` and `@LastModifiedDate` support: `Instant`, `LocalDateTime`, `ZonedDateTime`, `long`, `Long`, `Date`, `Calendar`.
+
+### Auditable base class
 
 ```java
-@Service
-@Transactional(readOnly = true)
-public class UserQueryService {
+@MappedSuperclass
+@EntityListeners(AuditingEntityListener.class)
+public abstract class AuditableEntity {
 
-    private final UserRepository userRepository;
+    @CreatedBy
+    private String createdBy;
 
-    public UserQueryService(UserRepository userRepository) {
-        this.userRepository = userRepository;
-    }
+    @CreatedDate
+    private Instant createdDate;
 
-    public Page<User> findAllUsers(Pageable pageable) {
-        return userRepository.findAll(pageable);
+    @LastModifiedBy
+    private String lastModifiedBy;
+
+    @LastModifiedDate
+    private Instant lastModifiedDate;
+}
+```
+
+### AuditorAware with Spring Security
+
+```java
+class SpringSecurityAuditorAware implements AuditorAware<String> {
+
+    @Override
+    public Optional<String> getCurrentAuditor() {
+        return Optional.ofNullable(SecurityContextHolder.getContext())
+                .map(SecurityContext::getAuthentication)
+                .filter(Authentication::isAuthenticated)
+                .map(Authentication::getPrincipal)
+                .map(User.class::cast)
+                .map(User::getUsername);
     }
 }
 ```
 
-## Database Migrations (Flyway)
+### Enable JPA auditing
 
-```sql
--- V1__create_users_table.sql
-CREATE TABLE users (
-    id BIGSERIAL PRIMARY KEY,
-    email VARCHAR(100) NOT NULL UNIQUE,
-    password VARCHAR(100) NOT NULL,
-    username VARCHAR(50) NOT NULL UNIQUE,
-    active BOOLEAN NOT NULL DEFAULT true,
-    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    version BIGINT NOT NULL DEFAULT 0
-);
+```java
+@Configuration
+@EnableJpaAuditing
+class AuditingConfig {
 
-CREATE INDEX idx_users_email ON users(email);
-CREATE INDEX idx_users_username ON users(username);
-CREATE INDEX idx_users_active ON users(active);
-
--- V2__create_addresses_table.sql
-CREATE TABLE addresses (
-    id BIGSERIAL PRIMARY KEY,
-    user_id BIGINT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-    street VARCHAR(200) NOT NULL,
-    city VARCHAR(100) NOT NULL,
-    country VARCHAR(2) NOT NULL,
-    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
-);
-
-CREATE INDEX idx_addresses_user_id ON addresses(user_id);
+    @Bean
+    public AuditorAware<String> auditorProvider() {
+        return new SpringSecurityAuditorAware();
+    }
+}
 ```
 
-## Quick Reference
+## Domain events
 
-| Annotation | Purpose |
-|------------|---------|
-| `@Entity` | Marks class as JPA entity |
-| `@Table` | Specifies table details and indexes |
-| `@Id` | Marks primary key field |
-| `@GeneratedValue` | Auto-generated primary key strategy |
-| `@Column` | Column constraints and mapping |
-| `@OneToMany/@ManyToOne` | One-to-many/many-to-one relationships |
-| `@ManyToMany` | Many-to-many relationships |
-| `@JoinColumn/@JoinTable` | Join column/table configuration |
-| `@Transactional` | Declares transaction boundaries |
-| `@Query` | Custom JPQL/native queries |
-| `@Modifying` | Marks query as UPDATE/DELETE |
-| `@EntityGraph` | Defines fetch graph for associations |
-| `@Version` | Optimistic locking version field |
+### Using AbstractAggregateRoot
+
+```java
+class Order extends AbstractAggregateRoot<Order> {
+
+    Order complete() {
+        registerEvent(new OrderCompleted(this.id));
+        return this;
+    }
+}
+```
+
+### Manual @DomainEvents
+
+```java
+class AnAggregateRoot {
+
+    @DomainEvents
+    Collection<Object> domainEvents() {
+        // return events to publish
+    }
+
+    @AfterDomainEventPublication
+    void callbackMethod() {
+        // clean up event list
+    }
+}
+```
+
+Events are published on `save(…)`, `saveAll(…)`, `delete(…)`, `deleteAll(…)`, `deleteAllInBatch(…)`. **Not** on `deleteById(…)`.
+
+## Transactions
+
+### Default behavior (SimpleJpaRepository)
+
+- Read operations: `@Transactional(readOnly = true)`
+- Write operations: `@Transactional`
+
+### Interface-level read-only with write override
+
+```java
+@Transactional(readOnly = true)
+interface UserRepository extends JpaRepository<User, Long> {
+
+    List<User> findByLastname(String lastname);
+
+    @Modifying
+    @Transactional
+    @Query("delete from User u where u.active = false")
+    void deleteInactiveUsers();
+}
+```
+
+### Custom timeout
+
+```java
+@Override
+@Transactional(timeout = 10)
+List<User> findAll();
+```
+
+### readOnly = true effects
+
+- **Hibernate**: sets flush mode to `NEVER`, skips dirty checks
+- **Performance**: significant improvement on large object trees
+- **Not a constraint**: does not prevent INSERT/UPDATE at the database level
+
+Best practice: define `@Transactional` boundaries at the service layer, not repository.
+
+## Locking
+
+```java
+interface UserRepository extends Repository<User, Long> {
+
+    @Lock(LockModeType.PESSIMISTIC_READ)
+    List<User> findByLastname(String lastname);
+
+    @Lock(LockModeType.PESSIMISTIC_WRITE)
+    Optional<User> findById(Long id);
+}
+```
+
+Common lock modes: `OPTIMISTIC`, `OPTIMISTIC_FORCE_INCREMENT`, `PESSIMISTIC_READ`, `PESSIMISTIC_WRITE`, `PESSIMISTIC_FORCE_INCREMENT`.
+
+## Entity graphs
+
+### Named entity graph
+
+```java
+@Entity
+@NamedEntityGraph(name = "GroupInfo.detail",
+                  attributeNodes = @NamedAttributeNode("members"))
+public class GroupInfo {
+    @ManyToMany
+    List<GroupMember> members = new ArrayList<>();
+}
+
+public interface GroupRepository extends CrudRepository<GroupInfo, String> {
+
+    @EntityGraph(value = "GroupInfo.detail", type = EntityGraphType.LOAD)
+    GroupInfo getByGroupName(String name);
+}
+```
+
+### Ad-hoc entity graph
+
+```java
+@EntityGraph(attributePaths = { "members" })
+GroupInfo getByGroupName(String name);
+```
+
+## Scrolling large results
+
+### Offset-based scrolling
+
+```java
+interface UserRepository extends Repository<User, Long> {
+    Window<User> findFirst10ByLastnameOrderByFirstname(String lastname, OffsetScrollPosition position);
+}
+
+WindowIterator<User> users = WindowIterator
+    .of(position -> repository.findFirst10ByLastnameOrderByFirstname("Doe", position))
+    .startingAt(OffsetScrollPosition.initial());
+```
+
+### Keyset-based scrolling
+
+```java
+interface UserRepository extends Repository<User, Long> {
+    Window<User> findFirst10ByLastnameOrderByFirstname(String lastname, KeysetScrollPosition position);
+}
+
+WindowIterator<User> users = WindowIterator
+    .of(position -> repository.findFirst10ByLastnameOrderByFirstname("Doe", position))
+    .startingAt(ScrollPosition.keyset());
+```
+
+### Pagination
+
+```java
+Page<User> findByLastname(String lastname, Pageable pageable);
+
+// Usage
+Page<User> users = repository.findByLastname("Doe", PageRequest.of(1, 20));
+```
