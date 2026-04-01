@@ -1,7 +1,7 @@
 ### 1. Plan Mode Default
 - Enter plan mode for ANY not-trivial task (3+ steps or architectural decisions)
 - Use plan mode for verification steps, not just building
-- Write detailed specs upfront to reduce ambiguity
+- Write plans only (no separate specs) — include context/design at the top of the plan file in `docs/plans/`
 
 ### 2. Self-Improvement Loop
 - After ANY correction from the user: update `tasks/lessons.md` with the pattern
@@ -14,6 +14,7 @@
 - Diff behavior between main and your changes when relevant
 - Ask yourself: "Would a staff engineer approve this?"
 - Run tests, check logs, demonstrate correctness
+- After finishing each task: mark its checkbox as `[x]` in the plan file in `docs/plans/` immediately
 
 ### 4. Demand Elegance (Balanced)
 - For non-trivial changes: pause and ask "is there a more elegant way?"
